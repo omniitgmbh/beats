@@ -3,7 +3,7 @@ name: Filebeat Builds
 on:
   workflow_dispatch:
   schedule:
-    - cron:  '*/5 * * * *'
+    - cron:  '37 19 * * *'
 
 jobs:
   build-candidates:
