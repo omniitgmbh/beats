@@ -1,0 +1,75 @@
+name: Filebeat Builds
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron:  '*/5 * * * *'
+
+jobs:
+  build-candidates:
+    name: Find build candidates
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.candidates.outputs.matrix }}
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+      with:
+        ref: ${{ github.event.inputs.ref }}
+    - id: candidates
+      name: Find new upstream tags if available
+      env:
+        UPSTREAM_REPO: elastic/beats
+      run: .github/workflows/repo-sync.sh
+  build:
+    name: Build & Release
+    needs: build-candidates
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{fromJson(needs.build-candidates.outputs.matrix)}}
+    steps:
+    - name: Check out code
+      uses: actions/checkout@v2
+      with:
+        repository: 'elastic/beats'
+        ref: ${{ matrix.tag }}
+    - name: Set up Go 1.15.2
+      uses: actions/setup-go@v2
+      with:
+        go-version: ^1.15.2
+      id: go
+    - name: Get dependencies
+      run: |
+        go get -v -t -d ./...
+        if [ -f Gopkg.toml ]; then
+            curl https://raw.githubusercontent.com/golang/dep/master/install.sh | sh
+            dep ensure
+        fi
+    - name: Build
+      run: GOOS=freebsd go build -v .
+      working-directory: filebeat
+    - name: Strip binary
+      run: strip filebeat
+      working-directory: filebeat
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ matrix.tag }}
+        release_name: Filebeat FreeBSD Binary ${{ matrix.tag }}
+        draft: false
+        prerelease: false
+        body: Inofficial Filebeat ${{ matrix.tag }} (${{ matrix.commitish }}) build for FreeBSD
+        commitish: ${{ matrix.commitish }}
+    - name: Upload Release Asset
+      id: upload-release-asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./filebeat/filebeat
+        asset_name: filebeat
+        asset_content_type: application/octet-stream
